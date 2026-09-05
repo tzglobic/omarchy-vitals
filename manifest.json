@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "tzglobic.vitals",
+  "name": "Vitals",
+  "version": "0.1.0",
+  "author": "tzglobic",
+  "license": "MIT",
+  "description": "Live CPU, memory, GPU, storage and I/O vitals with a per-core heat map, a one-minute history, and the processes behind the numbers.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Vitals",
+    "description": "System vitals at a glance: load, memory, thermals, I/O, and top processes, all in the shell's own theme.",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {
+      "refreshIntervalSec": 2,
+      "showLabel": false,
+      "processCount": 8,
+      "temperatureUnit": "C",
+      "warnPercent": 75,
+      "criticalPercent": 90
+    },
+    "schema": [
+      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 1, "max": 60, "step": 1, "defaultValue": 2, "description": "Sampling cadence while the panel is closed. The panel samples every second while open." },
+      { "key": "showLabel", "type": "boolean", "label": "Show CPU % in the bar", "defaultValue": false, "description": "Right-click the bar icon to toggle." },
+      { "key": "processCount", "type": "integer", "label": "Processes listed", "min": 3, "max": 20, "step": 1, "defaultValue": 8 },
+      { "key": "temperatureUnit", "type": "enum", "label": "Temperature unit", "options": ["C", "F"], "defaultValue": "C" },
+      { "key": "warnPercent", "type": "integer", "label": "Elevated threshold (%)", "min": 1, "max": 99, "step": 1, "defaultValue": 75, "description": "CPU or memory at or above this shows in the accent color." },
+      { "key": "criticalPercent", "type": "integer", "label": "Critical threshold (%)", "min": 2, "max": 100, "step": 1, "defaultValue": 90, "description": "CPU or memory at or above this shows in the urgent color and lights the bar icon." }
+    ]
+  }
+}

@@ -1,0 +1,652 @@
+#!/usr/bin/env python3
+"""Telemetry collector for the Vitals shell plugin.
+
+Everything comes from /proc and /sys as the invoking user; nothing here
+elevates, and nothing is written anywhere but stdout.
+
+  --stream      emit one JSON document per line until stdin closes. Commands
+                arrive on stdin so the panel can change cadence without
+                restarting the process (which would lose the rate baselines):
+                    interval <seconds>
+                    procs on|off [count]
+                    sample
+                    quit
+  --once        emit a single document (two quick samples for the deltas)
+  --signal term|kill <pid>
+                deliver SIGTERM or SIGKILL to a process owned by this user
+"""
+
+import argparse
+import glob
+import json
+import os
+import re
+import select
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+CLK_TCK = os.sysconf("SC_CLK_TCK")
+PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+PHYSICAL_DISK = re.compile(r"^(nvme\d+n\d+|sd[a-z]+|vd[a-z]+|xvd[a-z]+|mmcblk\d+)$")
+MIN_DELTA_SEC = 0.2
+PCI_IDS = ("/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids")
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def read_int(path):
+    try:
+        return int(read_text(path).strip())
+    except ValueError:
+        return None
+
+
+# --------------------------------------------------------------------- parsers
+
+def parse_cpu_stat(text):
+    """/proc/stat -> (aggregate jiffies, {core index: jiffies})."""
+    total, cores = [], {}
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts or not parts[0].startswith("cpu"):
+            continue
+        try:
+            values = [int(x) for x in parts[1:]]
+        except ValueError:
+            continue
+        if parts[0] == "cpu":
+            total = values
+        elif parts[0][3:].isdigit():
+            cores[int(parts[0][3:])] = values
+    return total, cores
+
+
+def busy_percent(curr, prev):
+    if len(curr) < 5 or len(prev) < 5:
+        return 0.0
+    delta_total = sum(curr) - sum(prev)
+    if delta_total <= 0:
+        return 0.0
+    delta_idle = (curr[3] + curr[4]) - (prev[3] + prev[4])
+    return round(clamp((delta_total - delta_idle) / delta_total * 100.0, 0.0, 100.0), 1)
+
+
+def parse_meminfo(text):
+    """/proc/meminfo -> {key: bytes}."""
+    out = {}
+    for line in text.splitlines():
+        key, sep, rest = line.partition(":")
+        if not sep:
+            continue
+        fields = rest.split()
+        if not fields:
+            continue
+        try:
+            value = int(fields[0])
+        except ValueError:
+            continue
+        out[key.strip()] = value * 1024 if len(fields) > 1 and fields[1] == "kB" else value
+    return out
+
+
+def memory_snapshot(mem):
+    total = mem.get("MemTotal", 0)
+    available = mem.get("MemAvailable", mem.get("MemFree", 0))
+    used = max(0, total - available)
+    # Page cache and reclaimable slab are "available" to applications but still
+    # occupied; the panel draws them as their own segment.
+    cached = mem.get("Cached", 0) + mem.get("SReclaimable", 0) + mem.get("Buffers", 0)
+    cached = max(0, min(cached, total - used))
+    swap_total = mem.get("SwapTotal", 0)
+    swap_used = max(0, swap_total - mem.get("SwapFree", 0))
+    return {
+        "totalBytes": total,
+        "usedBytes": used,
+        "availableBytes": available,
+        "cachedBytes": cached,
+        "freeBytes": max(0, total - used - cached),
+        "percent": round(used / total * 100.0, 1) if total else 0.0,
+        "swapTotalBytes": swap_total,
+        "swapUsedBytes": swap_used,
+        "swapPercent": round(swap_used / swap_total * 100.0, 1) if swap_total else 0.0,
+    }
+
+
+def parse_diskstats(text):
+    """/proc/diskstats -> (bytes read, bytes written) across whole physical disks."""
+    read_bytes = write_bytes = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 14 or not PHYSICAL_DISK.match(parts[2]):
+            continue
+        try:
+            read_bytes += int(parts[5]) * 512
+            write_bytes += int(parts[9]) * 512
+        except ValueError:
+            continue
+    return read_bytes, write_bytes
+
+
+def parse_netdev(text):
+    """/proc/net/dev -> (bytes received, bytes sent) over every interface but lo."""
+    rx = tx = 0
+    for line in text.splitlines()[2:]:
+        name, sep, rest = line.partition(":")
+        if not sep or name.strip() == "lo":
+            continue
+        fields = rest.split()
+        if len(fields) < 9:
+            continue
+        try:
+            rx += int(fields[0])
+            tx += int(fields[8])
+        except ValueError:
+            continue
+    return rx, tx
+
+
+def parse_stat(text):
+    """/proc/<pid>/stat -> fields the panel needs. comm may contain spaces and
+    parentheses, so it is bracketed by the first '(' and the last ')'."""
+    open_at = text.find("(")
+    close_at = text.rfind(")")
+    if open_at < 0 or close_at < open_at:
+        return None
+    rest = text[close_at + 2:].split()
+    if len(rest) < 22:
+        return None
+    try:
+        return {
+            "pid": int(text[:open_at].strip()),
+            "comm": text[open_at + 1:close_at],
+            "state": rest[0],
+            "ticks": int(rest[11]) + int(rest[12]),
+            "start": int(rest[19]),
+            "rss": int(rest[21]) * PAGE_SIZE,
+        }
+    except ValueError:
+        return None
+
+
+# --------------------------------------------------------------------- sensors
+
+def cpu_frequency_mhz():
+    total = count = 0
+    for path in glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq"):
+        value = read_int(path)
+        if value:
+            total += value
+            count += 1
+    if count:
+        return round(total / count / 1000)
+    values = re.findall(r"^cpu MHz\s*:\s*([\d.]+)", read_text("/proc/cpuinfo"), re.M)
+    return round(sum(float(v) for v in values) / len(values)) if values else None
+
+
+CPU_HWMON = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "soc_thermal", "cpu-thermal")
+CPU_PACKAGE_LABELS = ("Package id 0", "Tctl", "Tdie", "Tccd1", "CPU")
+CPU_THERMAL_ZONES = ("x86_pkg_temp", "TCPU", "cpu-thermal", "cpu_thermal", "soc_thermal", "acpitz")
+
+
+def cpu_temperature_c():
+    for hwmon in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+        if read_text(hwmon + "/name").strip() not in CPU_HWMON:
+            continue
+        hottest = None
+        for label_path in sorted(glob.glob(hwmon + "/temp*_label")):
+            value = read_int(label_path[:-len("_label")] + "_input")
+            if value is None:
+                continue
+            if read_text(label_path).strip() in CPU_PACKAGE_LABELS:
+                return round(value / 1000)
+            hottest = value if hottest is None else max(hottest, value)
+        if hottest is None:
+            hottest = read_int(hwmon + "/temp1_input")
+        if hottest is not None:
+            return round(hottest / 1000)
+    for zone in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+        if read_text(zone + "/type").strip() not in CPU_THERMAL_ZONES:
+            continue
+        value = read_int(zone + "/temp")
+        if value is not None and 0 < value < 150000:
+            return round(value / 1000)
+    return None
+
+
+def pci_device_name(vendor_id, device_id):
+    vendor_id = vendor_id.replace("0x", "").lower()
+    device_id = device_id.replace("0x", "").lower()
+    for path in PCI_IDS:
+        if not os.path.exists(path):
+            continue
+        in_vendor = False
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                if not line.startswith("\t"):
+                    in_vendor = line[:4].lower() == vendor_id
+                    continue
+                if in_vendor and line.startswith("\t" + device_id + "  "):
+                    name = line.strip()[len(device_id):].strip()
+                    bracket = re.search(r"\[([^\]]+)\]", name)
+                    return bracket.group(1) if bracket else name
+        break
+    return ""
+
+
+def hwmon_temperature_c(device_path):
+    for path in glob.glob(device_path + "/hwmon/hwmon*/temp1_input"):
+        value = read_int(path)
+        if value is not None:
+            return round(value / 1000)
+    return None
+
+
+class GpuProbe:
+    """One GPU, whichever the machine has. NVIDIA via nvidia-smi; AMD and Intel
+    via sysfs. Intel exposes no busy counter to unprivileged users, so its
+    utilization is estimated from time spent outside the RC6 idle state."""
+
+    def __init__(self):
+        self.kind = None
+        self.card = ""
+        self.vendor = ""
+        self.name = ""
+        self.prev_rc6 = None
+        self.prev_at = None
+        if shutil.which("nvidia-smi"):
+            self.kind, self.vendor = "nvidia", "NVIDIA"
+            return
+        for card in sorted(glob.glob("/sys/class/drm/card[0-9]*")):
+            device = card + "/device"
+            vendor = read_text(device + "/vendor").strip().lower()
+            if vendor == "0x1002":
+                self.kind, self.vendor = "amd", "AMD"
+            elif vendor == "0x8086":
+                self.kind, self.vendor = "intel", "Intel"
+            else:
+                continue
+            self.card = card
+            self.name = pci_device_name(vendor, read_text(device + "/device").strip()) or (self.vendor + " graphics")
+            break
+
+    def sample(self, now):
+        if self.kind == "nvidia":
+            return self._nvidia()
+        if self.kind == "amd":
+            return self._amd()
+        if self.kind == "intel":
+            return self._intel(now)
+        return {"available": False}
+
+    def _base(self):
+        return {
+            "available": True,
+            "vendor": self.vendor,
+            "name": self.name,
+            "percent": 0.0,
+            "freqMhz": None,
+            "maxFreqMhz": None,
+            "vramUsedBytes": 0,
+            "vramTotalBytes": 0,
+            "tempC": None,
+        }
+
+    def _nvidia(self):
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,clocks.gr,clocks.max.gr",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=1.5, check=False)
+            parts = [p.strip() for p in result.stdout.strip().splitlines()[0].split(",")]
+            if result.returncode != 0 or len(parts) < 7:
+                return {"available": False}
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return {"available": False}
+        out = self._base()
+        out["name"] = parts[0] or "NVIDIA graphics"
+        out["percent"] = float(parts[1] or 0)
+        out["vramUsedBytes"] = int(float(parts[2] or 0)) * 1024 * 1024
+        out["vramTotalBytes"] = int(float(parts[3] or 0)) * 1024 * 1024
+        out["tempC"] = int(float(parts[4])) if parts[4] else None
+        out["freqMhz"] = int(float(parts[5])) if parts[5] else None
+        out["maxFreqMhz"] = int(float(parts[6])) if parts[6] else None
+        return out
+
+    def _amd(self):
+        device = self.card + "/device"
+        out = self._base()
+        out["percent"] = float(read_int(device + "/gpu_busy_percent") or 0)
+        out["vramUsedBytes"] = read_int(device + "/mem_info_vram_used") or 0
+        out["vramTotalBytes"] = read_int(device + "/mem_info_vram_total") or 0
+        out["tempC"] = hwmon_temperature_c(device)
+        levels = re.findall(r"^\d+:\s*(\d+)\s*Mhz\s*(\*?)", read_text(device + "/pp_dpm_sclk"), re.M | re.I)
+        if levels:
+            out["maxFreqMhz"] = max(int(mhz) for mhz, _ in levels)
+            current = [int(mhz) for mhz, star in levels if star]
+            out["freqMhz"] = current[0] if current else None
+        return out
+
+    def _intel(self, now):
+        out = self._base()
+        act = read_int(self.card + "/gt_act_freq_mhz")
+        if act is None:
+            act = read_int(self.card + "/gt/gt0/rps_act_freq_mhz")
+        maximum = read_int(self.card + "/gt_max_freq_mhz")
+        if maximum is None:
+            maximum = read_int(self.card + "/gt/gt0/rps_max_freq_mhz")
+        out["freqMhz"] = act
+        out["maxFreqMhz"] = maximum
+        out["tempC"] = hwmon_temperature_c(self.card + "/device")
+        rc6 = read_int(self.card + "/power/rc6_residency_ms")
+        if rc6 is None:
+            rc6 = read_int(self.card + "/gt/gt0/rc6_residency_ms")
+        if rc6 is not None and self.prev_rc6 is not None and now > self.prev_at:
+            idle = (rc6 - self.prev_rc6) / ((now - self.prev_at) * 1000.0)
+            out["percent"] = round(clamp(100.0 - idle * 100.0, 0.0, 100.0), 1)
+        elif act and maximum:
+            out["percent"] = round(clamp(act / maximum * 100.0, 0.0, 100.0), 1)
+        self.prev_rc6 = rc6
+        self.prev_at = now
+        return out
+
+
+# ------------------------------------------------------------------- processes
+
+def process_name(pid, comm):
+    """comm is truncated to 15 bytes by the kernel; recover the full name from
+    argv[0] when it is plainly the same program."""
+    cmdline = read_text("/proc/%d/cmdline" % pid).split("\0")
+    if not cmdline or not cmdline[0]:
+        return comm
+    # Chromium-style processes rewrite argv[0] to the whole command line.
+    base = os.path.basename(cmdline[0].split()[0])
+    if base.startswith(comm) or comm.startswith(base[:15]):
+        return base or comm
+    return comm
+
+
+def scan_processes(prev, dt, count, uid, threads):
+    """Top `count` processes by CPU then memory. `prev` maps
+    (pid, starttime) -> ticks so a recycled pid never inherits a baseline."""
+    curr = {}
+    rows = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        path = "/proc/" + entry
+        info = parse_stat(read_text(path + "/stat"))
+        if info is None:
+            continue
+        key = (info["pid"], info["start"])
+        curr[key] = info["ticks"]
+        if info["state"] == "Z":
+            continue
+        cpu = 0.0
+        if dt and key in prev:
+            cpu = clamp((info["ticks"] - prev[key]) / CLK_TCK / dt * 100.0, 0.0, 100.0 * max(1, threads))
+        if info["rss"] == 0 and cpu == 0.0:
+            continue  # kernel threads and exited-but-lingering tasks
+        try:
+            owner = os.stat(path).st_uid
+        except OSError:
+            continue
+        rows.append({
+            "pid": info["pid"],
+            "name": info["comm"],
+            "state": info["state"],
+            "cpuPercent": round(cpu, 1),
+            "rssBytes": info["rss"],
+            "mine": owner == uid,
+        })
+    rows.sort(key=lambda row: (row["cpuPercent"], row["rssBytes"]), reverse=True)
+    top = rows[:count]
+    for row in top:
+        row["name"] = process_name(row["pid"], row["name"])
+    return top, curr
+
+
+def disk_usage():
+    out = []
+    seen = set()
+    for path in ("/", "/home"):
+        try:
+            stat = os.statvfs(path)
+        except OSError:
+            continue
+        # btrfs subvolumes report distinct st_dev and f_fsid for one filesystem;
+        # identical block counts at the same instant mean the same volume.
+        identity = (stat.f_frsize, stat.f_blocks, stat.f_bfree, stat.f_bavail)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        total = stat.f_blocks * stat.f_frsize
+        free = stat.f_bavail * stat.f_frsize
+        used = (stat.f_blocks - stat.f_bfree) * stat.f_frsize
+        out.append({
+            "path": path,
+            "totalBytes": total,
+            "usedBytes": used,
+            "freeBytes": free,
+            "percent": round(used / (used + free) * 100.0, 1) if used + free else 0.0,
+        })
+    return out
+
+
+def host_info():
+    model = re.search(r"^model name\s*:\s*(.+)$", read_text("/proc/cpuinfo"), re.M)
+    return {
+        "name": socket.gethostname(),
+        "cpuModel": model.group(1).strip() if model else "",
+        "threads": os.cpu_count() or 1,
+    }
+
+
+# --------------------------------------------------------------------- sampler
+
+class Sampler:
+    def __init__(self):
+        self.host = host_info()
+        self.gpu = GpuProbe()
+        self.uid = os.getuid()
+        self.prev_at = None
+        self.prev_total = None
+        self.prev_cores = {}
+        self.prev_disk = None
+        self.prev_net = None
+        self.prev_procs = {}
+        self.last = None
+
+    def baseline_processes(self):
+        _, self.prev_procs = scan_processes({}, None, 0, self.uid, self.host["threads"])
+
+    def sample(self, with_procs, proc_count):
+        now = time.monotonic()
+        dt = (now - self.prev_at) if self.prev_at is not None else None
+        # A "sample now" request right after a tick would compute rates over a
+        # sliver of time; hand back the last document instead of noisy numbers.
+        if dt is not None and dt < MIN_DELTA_SEC and self.last is not None:
+            self.last["at"] = time.time()
+            return self.last
+
+        total, cores = parse_cpu_stat(read_text("/proc/stat"))
+        disk = parse_diskstats(read_text("/proc/diskstats"))
+        net = parse_netdev(read_text("/proc/net/dev"))
+
+        cpu_percent = busy_percent(total, self.prev_total) if self.prev_total else 0.0
+        core_percent = [busy_percent(cores[i], self.prev_cores.get(i, cores[i])) for i in sorted(cores)]
+
+        def rate(curr, prev):
+            if not dt or prev is None:
+                return 0.0
+            return round(max(0.0, (curr - prev) / dt), 1)
+
+        processes = []
+        if with_procs:
+            processes, self.prev_procs = scan_processes(self.prev_procs, dt, proc_count, self.uid, self.host["threads"])
+        else:
+            self.prev_procs = {}
+
+        load = read_text("/proc/loadavg").split()[:3]
+        uptime = read_text("/proc/uptime").split()
+
+        doc = {
+            "version": 1,
+            "at": time.time(),
+            "uptimeSec": int(float(uptime[0])) if uptime else 0,
+            "host": self.host,
+            "cpu": {
+                "percent": cpu_percent,
+                "cores": core_percent,
+                "freqMhz": cpu_frequency_mhz(),
+                "tempC": cpu_temperature_c(),
+                "load": [float(x) for x in load] if len(load) == 3 else [],
+            },
+            "memory": memory_snapshot(parse_meminfo(read_text("/proc/meminfo"))),
+            "gpu": self.gpu.sample(now),
+            "io": {
+                "diskReadBps": rate(disk[0], self.prev_disk[0] if self.prev_disk else None),
+                "diskWriteBps": rate(disk[1], self.prev_disk[1] if self.prev_disk else None),
+                "netRxBps": rate(net[0], self.prev_net[0] if self.prev_net else None),
+                "netTxBps": rate(net[1], self.prev_net[1] if self.prev_net else None),
+            },
+            "disks": disk_usage(),
+            "processes": processes,
+        }
+
+        self.prev_at = now
+        self.prev_total = total
+        self.prev_cores = cores
+        self.prev_disk = disk
+        self.prev_net = net
+        self.last = doc
+        return doc
+
+
+def emit(doc):
+    try:
+        sys.stdout.write(json.dumps(doc, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError):
+        sys.exit(0)
+
+
+def stream(interval, with_procs, proc_count):
+    sampler = Sampler()
+    if with_procs:
+        sampler.baseline_processes()
+    sampler.sample(with_procs, proc_count)
+    time.sleep(0.3)
+    emit(sampler.sample(with_procs, proc_count))
+    next_at = time.monotonic() + interval
+
+    while True:
+        timeout = max(0.0, next_at - time.monotonic())
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        except (OSError, ValueError):
+            return
+        force = False
+        if ready:
+            line = sys.stdin.readline()
+            if line == "":
+                return  # the panel is gone
+            words = line.split()
+            if not words:
+                continue
+            if words[0] == "interval" and len(words) > 1:
+                try:
+                    interval = clamp(float(words[1]), 0.5, 3600.0)
+                except ValueError:
+                    continue
+                next_at = min(next_at, time.monotonic() + interval)
+            elif words[0] == "procs" and len(words) > 1:
+                wanted = words[1] == "on"
+                if len(words) > 2 and words[2].isdigit():
+                    proc_count = max(1, int(words[2]))
+                if wanted and not with_procs:
+                    sampler.baseline_processes()
+                    # Give the baseline a moment to accrue ticks, then show the list.
+                    next_at = min(next_at, time.monotonic() + 0.6)
+                with_procs = wanted
+            elif words[0] == "sample":
+                force = True
+            elif words[0] == "quit":
+                return
+        if force or time.monotonic() >= next_at:
+            emit(sampler.sample(with_procs, proc_count))
+            next_at = time.monotonic() + interval
+
+
+def deliver_signal(mode, pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "invalid pid"}
+    if pid <= 1:
+        return {"ok": False, "error": "refusing to signal pid %d" % pid}
+    if pid in (os.getpid(), os.getppid()):
+        return {"ok": False, "error": "that process is the shell hosting this panel"}
+    try:
+        owner = os.stat("/proc/%d" % pid).st_uid
+    except OSError:
+        return {"ok": False, "error": "process %d is gone" % pid}
+    if owner != os.getuid():
+        return {"ok": False, "error": "process %d belongs to another user" % pid}
+    try:
+        os.kill(pid, signal.SIGKILL if mode == "kill" else signal.SIGTERM)
+    except ProcessLookupError:
+        return {"ok": False, "error": "process %d is gone" % pid}
+    except PermissionError:
+        return {"ok": False, "error": "not permitted to signal %d" % pid}
+    return {"ok": True, "action": mode, "pid": pid}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="System telemetry for the Vitals shell plugin")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stream", action="store_true", help="emit JSON lines until stdin closes")
+    mode.add_argument("--once", action="store_true", help="emit one JSON document")
+    mode.add_argument("--signal", nargs=2, metavar=("term|kill", "PID"), help="signal a process you own")
+    parser.add_argument("--interval", type=float, default=2.0, help="seconds between documents")
+    parser.add_argument("--procs", type=int, default=8, help="how many top processes to report")
+    parser.add_argument("--no-procs", action="store_true", help="start with the process list off")
+    args = parser.parse_args()
+
+    if args.signal:
+        action, pid = args.signal
+        if action not in ("term", "kill"):
+            parser.error("--signal expects term or kill")
+        result = deliver_signal(action, pid)
+        print(json.dumps(result))
+        return 0 if result["ok"] else 1
+
+    if args.stream:
+        stream(clamp(args.interval, 0.5, 3600.0), not args.no_procs, max(1, args.procs))
+        return 0
+
+    sampler = Sampler()
+    sampler.baseline_processes()
+    sampler.sample(True, args.procs)
+    time.sleep(0.5)
+    emit(sampler.sample(True, args.procs))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
