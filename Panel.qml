@@ -19,7 +19,7 @@ Panel {
   // permits and expose refresh/state alongside the usual open/close.
   manageIpc: false
 
-  property var data: ({})
+  property var sample: ({})
   property var cpuHistory: []
   property bool collectorReady: false
   property string collectorError: ""
@@ -59,14 +59,14 @@ Panel {
   }
   readonly property string helper: pluginDir + "/bin/omarchy-vitals"
 
-  readonly property var cpu: data.cpu || ({})
-  readonly property var memory: data.memory || ({})
-  readonly property var gpu: data.gpu || ({})
-  readonly property var io: data.io || ({})
-  readonly property var disks: data.disks || []
-  readonly property var processes: data.processes || []
+  readonly property var cpu: sample.cpu || ({})
+  readonly property var memory: sample.memory || ({})
+  readonly property var gpu: sample.gpu || ({})
+  readonly property var io: sample.io || ({})
+  readonly property var disks: sample.disks || []
+  readonly property var processes: sample.processes || []
   readonly property int visibleProcessCount: Math.min(processCount, processes.length)
-  readonly property string level: Model.overallLevel(data, warnPercent, criticalPercent)
+  readonly property string level: Model.overallLevel(sample, warnPercent, criticalPercent)
   readonly property string cpuLevel: Model.levelFor(cpu.percent, warnPercent, criticalPercent)
   readonly property string memoryLevel: Model.levelFor(memory.percent, warnPercent, criticalPercent)
 
@@ -80,7 +80,7 @@ Panel {
     var doc
     try { doc = JSON.parse(line) } catch (e) { return }
     if (!doc || typeof doc !== "object" || !doc.cpu) return
-    root.data = doc
+    root.sample = doc
     root.cpuHistory = Model.pushHistory(root.cpuHistory, doc.at, doc.cpu.percent, root.historySec)
     root.collectorReady = true
     root.collectorError = ""
@@ -206,7 +206,7 @@ Panel {
     function toggle(): void { root.toggle() }
     function refresh(): void { root.refresh() }
     function btop(): void { root.openBtop() }
-    function state(): string { return JSON.stringify(root.data) }
+    function state(): string { return JSON.stringify(root.sample) }
     function snapshot(path: string): bool { return root.snapshot(path) }
   }
 
@@ -331,7 +331,7 @@ Panel {
             title: "Vitals"
             detail: root.collectorReady ? Model.statusLabel(root.level) : ""
             meta: root.collectorReady
-              ? Model.hostLine(root.data)
+              ? Model.hostLine(root.sample)
               : (root.collectorError !== "" ? "Collector unavailable" : "Warming up")
             iconComponent: Component {
               Text {
@@ -718,7 +718,7 @@ Panel {
 
     Text {
       anchors.left: parent.left
-      anchors.bottom: parent.bottom
+      anchors.top: parent.top
       anchors.margins: Style.space(5)
       textFormat: Text.PlainText
       text: root.historySec + "S"

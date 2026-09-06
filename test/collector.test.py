@@ -55,7 +55,7 @@ check("busy_percent short input", vitals.busy_percent([1, 2], [0, 1]), 0.0)
 
 # --- /proc/meminfo
 MEMINFO = """MemTotal:       16000000 kB
-MemFree:         3000000 kB
+MemFree:         2500000 kB
 MemAvailable:    8000000 kB
 Buffers:          500000 kB
 Cached:          4000000 kB
@@ -71,7 +71,7 @@ snap = vitals.memory_snapshot(mem)
 check("memory_snapshot used", snap["usedBytes"], 8000000 * 1024)
 check("memory_snapshot percent", snap["percent"], 50.0)
 check("memory_snapshot cached", snap["cachedBytes"], 5000000 * 1024)
-check("memory_snapshot free", snap["freeBytes"], 3000000 * 1024)
+check("memory_snapshot free is the kernel's MemFree", snap["freeBytes"], 2500000 * 1024)
 check("memory_snapshot swap", (snap["swapUsedBytes"], snap["swapPercent"]), (500000 * 1024, 3.1))
 check("memory_snapshot empty", vitals.memory_snapshot({})["percent"], 0.0)
 

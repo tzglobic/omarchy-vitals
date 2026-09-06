@@ -118,7 +118,7 @@ def memory_snapshot(mem):
         "usedBytes": used,
         "availableBytes": available,
         "cachedBytes": cached,
-        "freeBytes": max(0, total - used - cached),
+        "freeBytes": mem.get("MemFree", 0),
         "percent": round(used / total * 100.0, 1) if total else 0.0,
         "swapTotalBytes": swap_total,
         "swapUsedBytes": swap_used,
@@ -554,40 +554,52 @@ def stream(interval, with_procs, proc_count):
     time.sleep(0.3)
     emit(sampler.sample(with_procs, proc_count))
     next_at = time.monotonic() + interval
+    stdin_fd = sys.stdin.fileno()
+    pending = b""
 
     while True:
         timeout = max(0.0, next_at - time.monotonic())
         try:
-            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            ready, _, _ = select.select([stdin_fd], [], [], timeout)
         except (OSError, ValueError):
             return
         force = False
         if ready:
-            line = sys.stdin.readline()
-            if line == "":
-                return  # the panel is gone
-            words = line.split()
-            if not words:
-                continue
-            if words[0] == "interval" and len(words) > 1:
-                try:
-                    interval = clamp(float(words[1]), 0.5, 3600.0)
-                except ValueError:
-                    continue
-                next_at = min(next_at, time.monotonic() + interval)
-            elif words[0] == "procs" and len(words) > 1:
-                wanted = words[1] == "on"
-                if len(words) > 2 and words[2].isdigit():
-                    proc_count = max(1, int(words[2]))
-                if wanted and not with_procs:
-                    sampler.baseline_processes()
-                    # Give the baseline a moment to accrue ticks, then show the list.
-                    next_at = min(next_at, time.monotonic() + 0.6)
-                with_procs = wanted
-            elif words[0] == "sample":
-                force = True
-            elif words[0] == "quit":
+            # Read the raw fd rather than a buffered file: the panel writes
+            # several commands in one burst, and a buffered readline would
+            # swallow the rest of the chunk where select() can no longer see it.
+            try:
+                chunk = os.read(stdin_fd, 65536)
+            except OSError:
                 return
+            if not chunk:
+                return  # the panel is gone
+            pending += chunk
+            lines = pending.split(b"\n")
+            pending = lines.pop()
+            for raw in lines:
+                words = raw.decode("utf-8", errors="replace").split()
+                if not words:
+                    continue
+                if words[0] == "interval" and len(words) > 1:
+                    try:
+                        interval = clamp(float(words[1]), 0.5, 3600.0)
+                    except ValueError:
+                        continue
+                    next_at = min(next_at, time.monotonic() + interval)
+                elif words[0] == "procs" and len(words) > 1:
+                    wanted = words[1] == "on"
+                    if len(words) > 2 and words[2].isdigit():
+                        proc_count = max(1, int(words[2]))
+                    if wanted and not with_procs:
+                        sampler.baseline_processes()
+                        # Give the baseline a moment to accrue ticks, then show the list.
+                        next_at = min(next_at, time.monotonic() + 0.6)
+                    with_procs = wanted
+                elif words[0] == "sample":
+                    force = True
+                elif words[0] == "quit":
+                    return
         if force or time.monotonic() >= next_at:
             emit(sampler.sample(with_procs, proc_count))
             next_at = time.monotonic() + interval

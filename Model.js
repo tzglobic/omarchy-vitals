@@ -76,6 +76,11 @@ function shortCpuModel(model) {
   return s.replace(/\s+/g, " ").trim()
 }
 
+// "Intel Core i7-1260P" -> "i7-1260P"; the hero line has one row to spend.
+function compactCpuModel(model) {
+  return shortCpuModel(model).replace(/^(Intel Core|Intel|AMD)\s+/i, "")
+}
+
 // ------------------------------------------------------------------- levels
 
 function levelIndex(level) {
@@ -180,7 +185,7 @@ function hostLine(doc) {
   var d = doc || {}
   var host = d.host || {}
   var parts = []
-  var model = shortCpuModel(host.cpuModel)
+  var model = compactCpuModel(host.cpuModel)
   if (model) parts.push(model)
   if (host.threads > 0) parts.push(host.threads + " threads")
   if (d.uptimeSec > 0) parts.push("up " + formatUptime(d.uptimeSec))
@@ -224,7 +229,7 @@ function gpuDetail(gpu, unit) {
   var g = gpu || {}
   var parts = []
   if (g.freqMhz > 0) parts.push(formatFreq(g.freqMhz) + (g.maxFreqMhz > 0 ? " of " + formatFreq(g.maxFreqMhz) : ""))
-  else if (g.maxFreqMhz > 0) parts.push("idle · " + formatFreq(g.maxFreqMhz) + " max")
+  else if (g.maxFreqMhz > 0) parts.push("clock parked · " + formatFreq(g.maxFreqMhz) + " max")
   if (g.vramTotalBytes > 0) parts.push(formatBytes(g.vramUsedBytes) + " of " + formatBytes(g.vramTotalBytes))
   if (g.tempC !== null && g.tempC !== undefined) parts.push(formatTemp(g.tempC, unit))
   return parts.join(" · ")
@@ -255,7 +260,7 @@ if (typeof module !== "undefined" && module.exports) {
     LEVELS: LEVELS, TEMP_WARN_C: TEMP_WARN_C, TEMP_CRIT_C: TEMP_CRIT_C,
     clamp: clamp, formatBytes: formatBytes, formatRate: formatRate, formatFreq: formatFreq,
     formatTemp: formatTemp, formatUptime: formatUptime, formatPercent: formatPercent,
-    formatLoad: formatLoad, shortCpuModel: shortCpuModel,
+    formatLoad: formatLoad, shortCpuModel: shortCpuModel, compactCpuModel: compactCpuModel,
     levelIndex: levelIndex, maxLevel: maxLevel, levelFor: levelFor, tempLevel: tempLevel,
     overallLevel: overallLevel, statusLabel: statusLabel, heatAlpha: heatAlpha, coreColumns: coreColumns,
     pushHistory: pushHistory, sparklinePoints: sparklinePoints, sparklineArea: sparklineArea,

@@ -48,6 +48,9 @@ check("shortCpuModel amd mobile", M.shortCpuModel("AMD Ryzen 7 7840U w/ Radeon 7
 check("shortCpuModel amd desktop", M.shortCpuModel("AMD Ryzen 9 7950X 16-Core Processor"), "AMD Ryzen 9 7950X")
 check("shortCpuModel xeon", M.shortCpuModel("Intel(R) Xeon(R) CPU E5-2690 v4 @ 2.60GHz"), "Intel Xeon E5-2690 v4")
 check("shortCpuModel empty", M.shortCpuModel(undefined), "")
+check("compactCpuModel intel", M.compactCpuModel("12th Gen Intel(R) Core(TM) i7-1260P"), "i7-1260P")
+check("compactCpuModel amd", M.compactCpuModel("AMD Ryzen 9 7950X 16-Core Processor"), "Ryzen 9 7950X")
+check("compactCpuModel xeon", M.compactCpuModel("Intel(R) Xeon(R) CPU E5-2690 v4 @ 2.60GHz"), "Xeon E5-2690 v4")
 
 // --- levels
 check("levelFor normal", M.levelFor(10, 75, 90), "normal")
@@ -96,7 +99,7 @@ var doc = {
   memory: { totalBytes: 16 * GB, usedBytes: 8 * GB, cachedBytes: 4 * GB, swapTotalBytes: 16 * GB, swapUsedBytes: 0.5 * GB },
   gpu: { available: true, name: "Iris Xe Graphics", percent: 12, freqMhz: 317, maxFreqMhz: 1400, vramUsedBytes: 0, vramTotalBytes: 0, tempC: null }
 }
-check("hostLine", M.hostLine(doc), "Intel Core i7-1260P · 16 threads · up 3h 12m")
+check("hostLine", M.hostLine(doc), "i7-1260P · 16 threads · up 3h 12m")
 check("hostLine empty", M.hostLine({}), "")
 check("cpuDetail", M.cpuDetail(doc.cpu, "C"), "3.2 GHz · 64°C · load 1.17")
 check("cpuDetail sparse", M.cpuDetail({ percent: 3 }, "C"), "")
@@ -108,7 +111,7 @@ check("memoryFractions", M.memoryFractions(doc.memory), { used: 0.5, cached: 0.2
 check("memoryFractions never overruns", M.memoryFractions({ totalBytes: 10, usedBytes: 8, cachedBytes: 8 }), { used: 0.8, cached: 0.2 })
 check("memoryFractions empty", M.memoryFractions({}), { used: 0, cached: 0 })
 check("gpuDetail", M.gpuDetail(doc.gpu, "C"), "317 MHz of 1.4 GHz")
-check("gpuDetail idle clock", M.gpuDetail({ freqMhz: 0, maxFreqMhz: 1400 }, "C"), "idle · 1.4 GHz max")
+check("gpuDetail parked clock", M.gpuDetail({ freqMhz: 0, maxFreqMhz: 1400 }, "C"), "clock parked · 1.4 GHz max")
 check("gpuDetail discrete", M.gpuDetail({ freqMhz: 1800, maxFreqMhz: 2500, vramUsedBytes: GB, vramTotalBytes: 8 * GB, tempC: 55 }, "C"), "1.8 GHz of 2.5 GHz · 1 GB of 8 GB · 55°C")
 check("storageValue", M.storageValue({ freeBytes: 412 * GB }), "412 GB free")
 check("storageDetail", M.storageDetail({ totalBytes: 953 * GB, percent: 43.2 }), "of 953 GB · 43% used")

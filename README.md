@@ -184,6 +184,12 @@ elsewhere and symlink it in, apply changes with:
 omarchy restart shell
 ```
 
+Even for a plugin copied into place, a restart is the reliable path: the
+hot reload re-instantiates `Panel.qml` but serves `Model.js` from the QML
+engine's cache, and the reloaded panel's IPC target can end up stale. The
+collector is restarted either way, so `bin/omarchy-vitals` edits do take
+effect on reload.
+
 Check the shell log for QML errors with
 `journalctl --user -o cat _COMM=quickshell -f`.
 
