@@ -829,7 +829,7 @@ Panel {
           anchors.bottom: parent.bottom
           anchors.horizontalCenter: parent.horizontalCenter
           textFormat: Text.PlainText
-          text: coreCell.index < 10 ? "0" + coreCell.index : String(coreCell.index)
+          text: (coreCell.index + 1 < 10 ? "0" : "") + (coreCell.index + 1)
           color: coreCell.load >= root.warnPercent ? coreCell.meterColor : root.dim
           font.family: root.uiFont
           font.pixelSize: Style.font.caption
@@ -843,7 +843,7 @@ Panel {
 
         PanelToolTip {
           visible: heatMouse.containsMouse
-          text: "Core " + coreCell.index + " · " + Math.round(coreCell.load) + "%"
+          text: "Core " + (coreCell.index + 1) + " · " + Math.round(coreCell.load) + "%"
           fontFamily: root.uiFont
         }
       }
