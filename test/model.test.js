@@ -64,7 +64,6 @@ check("overallLevel worst wins", M.overallLevel({ cpu: { percent: 20, tempC: 60 
 check("overallLevel temperature alone", M.overallLevel({ cpu: { percent: 5, tempC: 88 }, memory: { percent: 30 } }, 75, 90), "elevated")
 check("overallLevel empty", M.overallLevel({}, 75, 90), "normal")
 check("overallLevel undefined", M.overallLevel(undefined, 75, 90), "normal")
-check("statusLabel", [M.statusLabel("normal"), M.statusLabel("elevated"), M.statusLabel("critical")], ["Nominal", "Elevated", "Critical"])
 
 check("meterColumns small", M.meterColumns(4), 4)
 check("meterColumns sixteen in one row", M.meterColumns(16), 16)

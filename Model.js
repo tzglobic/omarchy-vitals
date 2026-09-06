@@ -115,12 +115,6 @@ function overallLevel(doc, warn, crit) {
   return level
 }
 
-function statusLabel(level) {
-  if (level === "critical") return "Critical"
-  if (level === "elevated") return "Elevated"
-  return "Nominal"
-}
-
 // Per-core meters sit up to sixteen to a row; beyond that, rows are balanced.
 function meterColumns(count) {
   var n = Math.max(0, Math.floor(Number(count) || 0))
@@ -275,7 +269,7 @@ if (typeof module !== "undefined" && module.exports) {
     formatTemp: formatTemp, formatUptime: formatUptime, formatPercent: formatPercent,
     formatLoad: formatLoad, shortCpuModel: shortCpuModel, compactCpuModel: compactCpuModel,
     levelIndex: levelIndex, maxLevel: maxLevel, levelFor: levelFor, tempLevel: tempLevel,
-    overallLevel: overallLevel, statusLabel: statusLabel, meterColumns: meterColumns,
+    overallLevel: overallLevel, meterColumns: meterColumns,
     busiestCore: busiestCore, coresSummary: coresSummary,
     pushHistory: pushHistory, sparklinePoints: sparklinePoints, sparklineArea: sparklineArea,
     hostLine: hostLine, cpuDetail: cpuDetail, memoryDetail: memoryDetail, swapDetail: swapDetail,

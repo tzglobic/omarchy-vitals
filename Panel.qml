@@ -339,12 +339,11 @@ Panel {
           width: scroller.width
           spacing: Style.spacing.panelGap
 
-          // ---------- Hero: glyph · title/status pill · host line · btop ----------
+          // ---------- Hero: status-colored glyph · title · host line · btop ----------
           PanelHero {
             foreground: root.fg
             fontFamily: root.uiFont
             title: "Vitals"
-            detail: root.collectorReady ? Model.statusLabel(root.level) : ""
             meta: root.collectorReady
               ? Model.hostLine(root.sample)
               : (root.collectorError !== "" ? "Collector unavailable" : "Warming up")
