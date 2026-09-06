@@ -19,8 +19,9 @@ in the shell's own components and theme.
   the critical threshold. Right-click shows the CPU percentage next to it,
   middle-click opens `btop`.
 - **CPU.** Total load with clock, package temperature, and load average; a
-  60-second history sparkline; and one heat cell per logical core, tinted in
-  the accent color by load (urgent once a core is pinned).
+  60-second history sparkline; and, behind a disclosure row that names the
+  busiest core, one vertical meter per logical core in the accent color
+  (urgent once a core is pinned).
 - **Memory.** Used and cached as two segments of one bar, with a legend, plus
   a thin swap bar when swap exists.
 - **Tiles.** Network and disk throughput, GPU utilization with clock and
@@ -79,6 +80,7 @@ The plugin keeps no state on disk, so removing it leaves nothing behind.
 | `K` | Force-kill the selected process (SIGKILL) — press twice |
 | `Enter` / `Space` | Same as `x` |
 | `r` | Sample right now |
+| `c` | Expand or collapse the per-core meters (remembered) |
 | `b` | Open `btop` and close the panel |
 | `Tab` / `Shift+Tab` | Switch to the neighbouring bar panel |
 | `Esc` | Close |
@@ -97,6 +99,7 @@ omarchy bar set tzglobic.vitals processCount 12
 |---|---|---|
 | `refreshIntervalSec` | `2` | Sampling cadence while the panel is closed; it samples every second while open |
 | `showLabel` | `false` | Show the CPU percentage in the bar (right-click toggles it) |
+| `coresExpanded` | `false` | Show the per-core meters; the `c` key and the disclosure row toggle it and remember the choice |
 | `processCount` | `8` | Rows in the process list |
 | `temperatureUnit` | `C` | `C` or `F` |
 | `warnPercent` | `75` | CPU or memory at or above this is *elevated* (accent color) |
@@ -114,6 +117,7 @@ script:
 omarchy-shell vitals open       # or close / toggle
 omarchy-shell vitals refresh    # sample now
 omarchy-shell vitals btop       # launch btop
+omarchy-shell vitals cores      # expand or collapse the per-core meters
 omarchy-shell vitals state      # the latest sample as JSON
 omarchy-shell vitals snapshot ~/Pictures/vitals.png   # render the open panel to PNG
 ```

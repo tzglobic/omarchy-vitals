@@ -121,18 +121,31 @@ function statusLabel(level) {
   return "Nominal"
 }
 
-// Fill opacity for a per-core heat cell. Eased so light loads stay visible
-// against the panel while the top end still reads as saturated.
-function heatAlpha(percent) {
-  var p = clamp(percent, 0, 100) / 100
-  return Math.round((0.08 + 0.84 * Math.pow(p, 0.8)) * 1000) / 1000
+// Per-core meters sit up to sixteen to a row; beyond that, rows are balanced.
+function meterColumns(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0))
+  if (n <= 16) return n
+  return Math.ceil(n / Math.ceil(n / 16))
 }
 
-// Heat cells sit in up to eight columns so they stay chunky enough to read.
-function coreColumns(count) {
-  var n = Math.max(0, Math.floor(Number(count) || 0))
-  if (n <= 4) return n
-  return Math.min(8, Math.ceil(n / 2))
+function busiestCore(cores) {
+  var list = cores || []
+  var best = -1, index = -1
+  for (var i = 0; i < list.length; i++) {
+    var v = Number(list[i])
+    if (isFinite(v) && v > best) { best = v; index = i }
+  }
+  return index < 0 ? null : { index: index, percent: best }
+}
+
+// Label for the per-core disclosure row: "16 cores · busiest 42%" while the
+// meters are hidden, just the count once they are showing.
+function coresSummary(cores, expanded) {
+  var list = cores || []
+  var text = list.length + (list.length === 1 ? " core" : " cores")
+  if (expanded) return text
+  var busiest = busiestCore(list)
+  return busiest ? text + " · busiest " + formatPercent(busiest.percent) : text
 }
 
 // ------------------------------------------------------------------ history
@@ -262,7 +275,8 @@ if (typeof module !== "undefined" && module.exports) {
     formatTemp: formatTemp, formatUptime: formatUptime, formatPercent: formatPercent,
     formatLoad: formatLoad, shortCpuModel: shortCpuModel, compactCpuModel: compactCpuModel,
     levelIndex: levelIndex, maxLevel: maxLevel, levelFor: levelFor, tempLevel: tempLevel,
-    overallLevel: overallLevel, statusLabel: statusLabel, heatAlpha: heatAlpha, coreColumns: coreColumns,
+    overallLevel: overallLevel, statusLabel: statusLabel, meterColumns: meterColumns,
+    busiestCore: busiestCore, coresSummary: coresSummary,
     pushHistory: pushHistory, sparklinePoints: sparklinePoints, sparklineArea: sparklineArea,
     hostLine: hostLine, cpuDetail: cpuDetail, memoryDetail: memoryDetail, swapDetail: swapDetail,
     memoryFractions: memoryFractions, gpuDetail: gpuDetail, storageValue: storageValue,

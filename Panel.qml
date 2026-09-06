@@ -36,6 +36,7 @@ Panel {
 
   readonly property int refreshIntervalSec: Math.round(Util.clamp(setting("refreshIntervalSec", 2), 1, 60))
   readonly property bool showLabel: setting("showLabel", false) === true
+  readonly property bool coresExpanded: setting("coresExpanded", false) === true
   readonly property int processCount: Math.round(Util.clamp(setting("processCount", 8), 3, 20))
   readonly property string temperatureUnit: String(setting("temperatureUnit", "C")).toUpperCase() === "F" ? "F" : "C"
   readonly property int warnPercent: Math.round(Util.clamp(setting("warnPercent", 75), 1, 99))
@@ -183,7 +184,19 @@ Panel {
   }
 
   function toggleLabel() {
-    root.settings = Object.assign({}, root.settings, { showLabel: !root.showLabel })
+    root.persistSetting("showLabel", !root.showLabel)
+  }
+
+  function toggleCores() {
+    root.persistSetting("coresExpanded", !root.coresExpanded)
+  }
+
+  // Write one inline setting back to shell.json so the choice survives a
+  // shell restart, the same way the power panel remembers its percentage.
+  function persistSetting(key, value) {
+    var next = {}
+    next[key] = value
+    root.settings = Object.assign({}, root.settings, next)
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, root.settings)
   }
 
@@ -206,6 +219,7 @@ Panel {
     function toggle(): void { root.toggle() }
     function refresh(): void { root.refresh() }
     function btop(): void { root.openBtop() }
+    function cores(): void { root.toggleCores() }
     function state(): string { return JSON.stringify(root.sample) }
     function snapshot(path: string): bool { return root.snapshot(path) }
   }
@@ -307,6 +321,7 @@ Panel {
       onTextKey: function(t) {
         if (t === "r") root.refresh()
         else if (t === "b") root.openBtop()
+        else if (t === "c") root.toggleCores()
         else if (t === "K" && root.cursorActive) root.requestSignal(root.cursorIndex, "kill")
       }
 
@@ -389,9 +404,39 @@ Panel {
               lineColor: root.levelColor(root.cpuLevel)
             }
 
-            CoreGrid {
+            // Disclosure row for the per-core meters. Borderless and
+            // left-aligned so it reads as a list row, not a form control;
+            // collapsed, it still names the busiest core.
+            Button {
               width: parent.width
-              cores: root.cpu.cores || []
+              visible: (root.cpu.cores ? root.cpu.cores.length : 0) > 0
+              leftAlign: true
+              iconText: root.coresExpanded ? "󰅀" : "󰅂"
+              text: Model.coresSummary(root.cpu.cores, root.coresExpanded)
+              foreground: root.fg
+              fontFamily: root.uiFont
+              fontSize: Style.font.caption
+              iconSize: Style.font.caption
+              horizontalPadding: Style.space(8)
+              verticalPadding: Style.space(4)
+              tooltipText: root.coresExpanded ? "Collapse per-core meters (c)" : "Expand per-core meters (c)"
+              onClicked: root.toggleCores()
+            }
+
+            Item {
+              id: coresDrawer
+              width: parent.width
+              clip: true
+              height: root.coresExpanded ? coreGrid.implicitHeight : 0
+              implicitHeight: height
+              visible: root.coresExpanded || height > 0
+              Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+
+              CoreGrid {
+                id: coreGrid
+                width: parent.width
+                cores: root.cpu.cores || []
+              }
             }
           }
 
@@ -730,40 +775,62 @@ Panel {
     }
   }
 
-  // Per-core heat map. The model is a count so cells persist across ticks and
-  // their color animates as load moves between cores.
+  // Per-core meters: one slender vertical bar per logical core, up to sixteen
+  // to a row, filling upward with load. The model is a count so bars persist
+  // across ticks and animate instead of being rebuilt every second.
   component CoreGrid: Grid {
     id: grid
     property var cores: []
 
-    columns: Model.coreColumns(cores.length)
-    rowSpacing: Style.space(4)
-    columnSpacing: Style.space(4)
+    columns: Model.meterColumns(cores.length)
+    rowSpacing: Style.space(8)
+    columnSpacing: Style.space(3)
     readonly property real cell: columns > 0 ? (width - columnSpacing * (columns - 1)) / columns : 0
 
     Repeater {
       model: grid.cores.length
-      delegate: Rectangle {
-        id: heatCell
+      delegate: Item {
+        id: coreCell
         required property int index
         readonly property real load: Util.clamp(grid.cores[index], 0, 100)
         readonly property string cellLevel: Model.levelFor(load, root.warnPercent, root.criticalPercent)
+        readonly property color meterColor: cellLevel === "critical" ? root.urgent : root.accent
 
         width: grid.cell
-        height: Style.space(18)
-        radius: Math.min(Style.cornerRadius, Style.space(4))
-        color: Util.alpha(cellLevel === "critical" ? root.urgent : root.accent, Model.heatAlpha(load))
-        border.width: 1
-        border.color: Util.alpha(root.fg, 0.08)
-        Behavior on color { ColorAnimation { duration: 450; easing.type: Easing.OutCubic } }
+        height: Style.space(46)
+
+        Rectangle {
+          id: meterTrack
+          anchors.top: parent.top
+          anchors.bottom: coreLabel.top
+          anchors.bottomMargin: Style.space(3)
+          anchors.horizontalCenter: parent.horizontalCenter
+          width: Math.max(Style.space(4), Math.min(Style.space(10), Math.round(parent.width * 0.5)))
+          radius: width / 2
+          color: root.track
+
+          Rectangle {
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
+            // A loaded core always shows at least a rounded nub.
+            height: coreCell.load > 0 ? Math.max(parent.width, parent.height * coreCell.load / 100) : 0
+            radius: parent.radius
+            color: coreCell.meterColor
+            opacity: 0.35 + 0.65 * coreCell.load / 100
+
+            Behavior on height { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+            Behavior on color { ColorAnimation { duration: 250 } }
+          }
+        }
 
         Text {
-          anchors.centerIn: parent
-          visible: grid.cell >= Style.space(26)
+          id: coreLabel
+          anchors.bottom: parent.bottom
+          anchors.horizontalCenter: parent.horizontalCenter
           textFormat: Text.PlainText
-          text: Math.round(heatCell.load)
-          color: root.fg
-          opacity: 0.55 + 0.45 * heatCell.load / 100
+          text: coreCell.index < 10 ? "0" + coreCell.index : String(coreCell.index)
+          color: coreCell.load >= root.warnPercent ? coreCell.meterColor : root.dim
           font.family: root.uiFont
           font.pixelSize: Style.font.caption
         }
@@ -776,7 +843,7 @@ Panel {
 
         PanelToolTip {
           visible: heatMouse.containsMouse
-          text: "Core " + heatCell.index + " · " + Math.round(heatCell.load) + "%"
+          text: "Core " + coreCell.index + " · " + Math.round(coreCell.load) + "%"
           fontFamily: root.uiFont
         }
       }
