@@ -236,8 +236,8 @@ function gpuDetail(gpu, unit) {
   var g = gpu || {}
   var parts = []
   if (g.freqMhz > 0) parts.push(formatFreq(g.freqMhz) + (g.maxFreqMhz > 0 ? " of " + formatFreq(g.maxFreqMhz) : ""))
-  else if (g.maxFreqMhz > 0) parts.push("clock parked · " + formatFreq(g.maxFreqMhz) + " max")
-  if (g.vramTotalBytes > 0) parts.push(formatBytes(g.vramUsedBytes) + " of " + formatBytes(g.vramTotalBytes))
+  else if (g.maxFreqMhz > 0) parts.push((g.freqMhz === 0 ? "clock parked · " : "") + formatFreq(g.maxFreqMhz) + " max")
+  if (g.vramTotalBytes > 0 && g.vramUsedBytes !== null && g.vramUsedBytes !== undefined) parts.push(formatBytes(g.vramUsedBytes) + " of " + formatBytes(g.vramTotalBytes))
   if (g.tempC !== null && g.tempC !== undefined) parts.push(formatTemp(g.tempC, unit))
   return parts.join(" · ")
 }
@@ -252,14 +252,16 @@ function storageDetail(disk) {
   return "of " + formatBytes(d.totalBytes) + " · " + Math.round(Number(d.percent) || 0) + "% used"
 }
 
-function hasPid(processes, pid) {
+function hasPid(processes, pid, startTime) {
   var list = processes || []
-  for (var i = 0; i < list.length; i++) if (list[i].pid === pid) return true
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].pid === pid && list[i].startTime === startTime) return true
+  }
   return false
 }
 
-function signalArgs(helper, mode, pid) {
-  return [helper, "--signal", mode === "kill" ? "kill" : "term", String(pid)]
+function signalArgs(helper, mode, pid, startTime) {
+  return [helper, "--signal", mode === "kill" ? "kill" : "term", String(pid), "--start-time", String(startTime)]
 }
 
 if (typeof module !== "undefined" && module.exports) {

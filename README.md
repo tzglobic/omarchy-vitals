@@ -42,31 +42,46 @@ in the shell's own components and theme.
   and builds its UI from the shell's own `qs.Ui` components and `Style`/`Color`
   singletons. Those are internal shell API, so a much older or newer shell may
   not load it. Developed against Omarchy 4.0.2 with Quickshell 0.3.1.
-- **Python 3**, which Omarchy installs. The collector uses only the standard
+- **Python 3.9 or newer**, which Omarchy installs. The collector uses only the standard
   library.
+
+Process actions require Linux PID file descriptor support (kernel 5.3 or
+newer). If unavailable, the collector refuses the action and reports an error.
 
 Nothing else. No daemons, no elevated permissions, no packages. The GPU tile
 uses `nvidia-smi` when present, and sysfs for AMD and Intel otherwise.
 
 ## Install
 
+Copy this repository's HTTPS clone URL from GitHub's **Code** menu, then
+paste it at the prompt below:
+
 ```bash
-omarchy plugin add https://github.com/tzglobic/omarchy-vitals.git --enable
+read -r -p "Repository HTTPS clone URL: " VITALS_REPO_URL
+omarchy plugin add "$VITALS_REPO_URL" --enable
 ```
 
-Or clone into place and rescan:
+Or, using the same URL, clone into place and rescan:
 
 ```bash
-git clone https://github.com/tzglobic/omarchy-vitals.git \
-  ~/.config/omarchy/plugins/tzglobic.vitals
+git clone "$VITALS_REPO_URL" ~/.config/omarchy/plugins/omarchy.vitals
 omarchy-shell shell rescanPlugins
-omarchy plugin enable tzglobic.vitals --section right
+omarchy plugin enable omarchy.vitals --section right
 ```
+
+### Upgrading from the previous plugin ID
+
+The plugin ID is now `omarchy.vitals`. Before upgrading an existing
+installation, record its settings and remove it using
+`omarchy plugin remove <previous-plugin-id>` (replace the placeholder with
+the ID in the installed copy's `manifest.json`). Then install this version
+and reapply your settings using `omarchy bar set omarchy.vitals ...`.
+Settings stored under the previous ID are not migrated automatically.
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove tzglobic.vitals
+omarchy plugin remove omarchy.vitals
 ```
 
 The plugin keeps no state on disk, so removing it leaves nothing behind.
@@ -90,9 +105,9 @@ The plugin keeps no state on disk, so removing it leaves nothing behind.
 Tunable from the shell like any first-party widget:
 
 ```bash
-omarchy bar set tzglobic.vitals refreshIntervalSec 5
-omarchy bar set tzglobic.vitals temperatureUnit F
-omarchy bar set tzglobic.vitals processCount 12
+omarchy bar set omarchy.vitals refreshIntervalSec 5
+omarchy bar set omarchy.vitals temperatureUnit F
+omarchy bar set omarchy.vitals processCount 12
 ```
 
 | Key | Default | Meaning |
@@ -148,12 +163,18 @@ history. Closed, a tick costs a handful of small file reads.
 counter to unprivileged users, so the tile derives load from time spent
 outside the RC6 idle state, with the clock shown alongside as ground truth.
 AMD reports `gpu_busy_percent` directly; NVIDIA goes through `nvidia-smi`.
+Unsupported NVIDIA readings are unavailable rather than reported as zero;
+an unknown utilization is shown as a dash.
 
 **Ending a process is deliberately two steps.** The first `x` (or click on
 the ✕) arms the row and shows what is about to happen; the second, within
 four seconds, delivers the signal. Moving the cursor disarms. The collector
 re-checks that the process is yours immediately before signalling, refuses
-PID 1, and refuses the shell that hosts the panel.
+PID 1, and refuses the shell that hosts the panel. Confirmation identifies a
+process by both PID and start time. Signals use a PID file descriptor, so a
+process that exits and has its PID reused cannot cause the replacement to
+receive the signal. Direct `--signal` calls must include
+`--start-time <startTime>` from the selected process's JSON row.
 
 ## Layout
 
@@ -163,7 +184,9 @@ PID 1, and refuses the shell that hosts the panel.
 | `Model.js` | Pure presentation logic — formatting, levels, history geometry |
 | `bin/omarchy-vitals` | The collector: `/proc` and `/sys` to JSON, plus the signal action |
 | `test/model.test.js` | Presentation logic, run with `node` |
-| `test/collector.test.py` | Parsers against fixtures, then one real sample |
+| `test/collector.test.py` | Portable parser fixtures |
+| `test/regressions.test.py` | GPU, CPU, process-name and mocked signal regressions |
+| `test/integration.test.py` | Linux-only live collector check |
 
 `Model.js` holds no QML imports and no side effects, so the same code runs
 under Quickshell's JS engine and under `node`.
@@ -173,10 +196,14 @@ under Quickshell's JS engine and under `node`.
 ```bash
 node test/model.test.js
 python3 test/collector.test.py
+python3 test/regressions.test.py
+python3 test/integration.test.py
 ```
 
-Neither signals a process; the collector test reads your machine once, the
-same way the panel does.
+No test signals a real process. Regression tests require Python 3.11 or newer.
+The integration test reads a live sample on Linux and explicitly skips on
+other platforms. GitHub Actions runs all four suites on Linux for pushes and
+pull requests. QML rendering still requires manual verification in Omarchy.
 
 ## Developing
 
