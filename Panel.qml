@@ -13,7 +13,7 @@ import "Model.js" as Model
 // baselines survive open/close.
 Panel {
   id: root
-  moduleName: "tzglobic.vitals"
+  moduleName: "omarchy.vitals"
   ipcTarget: "vitals"
   // manageIpc: false so this panel can own the single IpcHandler the target
   // permits and expose refresh/state alongside the usual open/close.
@@ -30,6 +30,7 @@ Panel {
   property bool cursorActive: false
   property int cursorIndex: 0
   property int armedPid: 0
+  property string armedStartTime: ""
   property string armedMode: ""
   property string notice: ""
   property string noticeKind: "info"
@@ -87,7 +88,7 @@ Panel {
     root.collectorError = ""
     var n = root.processes.length
     if (root.cursorIndex >= n) root.cursorIndex = Math.max(0, n - 1)
-    if (root.armedPid !== 0 && !Model.hasPid(root.processes, root.armedPid)) root.disarm()
+    if (root.armedPid !== 0 && !Model.hasPid(root.processes, root.armedPid, root.armedStartTime)) root.disarm()
   }
 
   function send(command) {
@@ -134,6 +135,7 @@ Panel {
 
   function disarm() {
     root.armedPid = 0
+    root.armedStartTime = ""
     root.armedMode = ""
     armTimer.stop()
   }
@@ -146,19 +148,20 @@ Panel {
       root.showNotice(p.name + " belongs to another user", "warn")
       return
     }
-    if (root.armedPid === p.pid && root.armedMode === mode) {
-      root.deliver(mode, p.pid, p.name)
+    if (root.armedPid === p.pid && root.armedStartTime === p.startTime && root.armedMode === mode) {
+      root.deliver(mode, p.pid, p.name, p.startTime)
       return
     }
     root.armedPid = p.pid
+    root.armedStartTime = p.startTime || ""
     root.armedMode = mode
     armTimer.restart()
   }
 
-  function deliver(mode, pid, name) {
+  function deliver(mode, pid, name, startTime) {
     root.disarm()
     actionProc.pendingName = name
-    actionProc.command = Model.signalArgs(root.helper, mode, pid)
+    actionProc.command = Model.signalArgs(root.helper, mode, pid, startTime)
     actionProc.running = true
   }
 
@@ -533,10 +536,10 @@ Panel {
               width: tiles.cell
               icon: "󰢮"
               label: root.gpu.name || "GPU"
-              value: Model.formatPercent(root.gpu.percent)
+              value: root.gpu.percent === null ? "—" : Model.formatPercent(root.gpu.percent)
               valueColor: root.levelColor(Model.levelFor(root.gpu.percent, root.warnPercent, root.criticalPercent))
               sub: Model.gpuDetail(root.gpu, root.temperatureUnit)
-              fraction: Util.clamp(root.gpu.percent, 0, 100) / 100
+              fraction: root.gpu.percent === null ? -1 : Util.clamp(root.gpu.percent, 0, 100) / 100
             }
 
             Repeater {
@@ -1009,7 +1012,7 @@ Panel {
     id: row
     property int rowIndex: 0
     readonly property var proc: root.processes[rowIndex] || ({})
-    readonly property bool armed: root.armedPid !== 0 && root.armedPid === proc.pid
+    readonly property bool armed: root.armedPid !== 0 && root.armedPid === proc.pid && root.armedStartTime === proc.startTime
     readonly property bool mine: proc.mine === true
     readonly property string procLevel: Model.levelFor(proc.cpuPercent, root.warnPercent, root.criticalPercent)
 

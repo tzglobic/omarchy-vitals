@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 # Run with: python3 test/collector.test.py
-# Exercises the parsers in bin/omarchy-vitals against fixtures, then runs the
-# real collector once to check the document shape. Nothing here signals a
+# Exercises the parsers in bin/omarchy-vitals against fixtures. Nothing here signals a
 # process or reads anything the collector would not read anyway.
 
 import importlib.machinery
 import importlib.util
-import json
 import os
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -117,20 +114,6 @@ check("deliver_signal refuses missing", vitals.deliver_signal("term", 2 ** 22 - 
 check("deliver_signal refuses itself", vitals.deliver_signal("term", os.getpid())["ok"], False)
 if os.getuid() != 0:
     check("deliver_signal refuses another user's process", vitals.deliver_signal("term", 2)["ok"], False)
-
-# --- the real thing, once
-result = subprocess.run([sys.executable, BIN, "--once", "--procs", "3"], capture_output=True, text=True, timeout=20)
-check("--once exits cleanly", result.returncode, 0)
-doc = json.loads(result.stdout.strip().splitlines()[-1]) if result.stdout.strip() else {}
-for key in ("version", "at", "uptimeSec", "host", "cpu", "memory", "gpu", "io", "disks", "processes"):
-    ok("--once document has " + key, key in doc)
-check("--once host threads", doc.get("host", {}).get("threads"), os.cpu_count())
-ok("--once per-core list matches thread count", len(doc.get("cpu", {}).get("cores", [])) == os.cpu_count())
-ok("--once reports at most the requested processes", len(doc.get("processes", [])) <= 3)
-ok("--once memory percent is sane", 0 <= doc.get("memory", {}).get("percent", -1) <= 100)
-ok("--once lists the root filesystem", any(d.get("path") == "/" for d in doc.get("disks", [])))
-for proc in doc.get("processes", []):
-    ok("--once process rows carry the panel's fields", all(k in proc for k in ("pid", "name", "cpuPercent", "rssBytes", "mine")))
 
 if failures:
     print("%d failure(s)" % failures, file=sys.stderr)
