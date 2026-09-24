@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy.vitals",
+  "id": "tzglobic.vitals",
   "name": "Vitals",
   "version": "0.1.0",
   "author": "Vitals contributors",
   "license": "MIT",
-  "description": "Live CPU, memory, GPU, storage and I/O vitals with a per-core heat map, a one-minute history, and the processes behind the numbers.",
+  "description": "Live CPU, memory, GPU, storage and I/O vitals with per-core meters, a one-minute history, and the processes behind the numbers.",
   "kinds": [
     "bar-widget"
   ],

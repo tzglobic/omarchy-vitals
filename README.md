@@ -1,8 +1,8 @@
 # Vitals
 
 Live system vitals for the [Omarchy](https://omarchy.org) shell: a bar icon
-that turns urgent when something is saturated, and a panel with CPU load and a
-per-core heat map, a minute of history, memory with its cache segment, GPU,
+that turns urgent when something is saturated, and a panel with CPU load and
+per-core meters, a minute of history, memory with its cache segment, GPU,
 storage, network and disk throughput, and the processes behind the numbers,
 with a keyboard cursor and a two-step end/kill action.
 
@@ -54,35 +54,23 @@ uses `nvidia-smi` when present, and sysfs for AMD and Intel otherwise.
 
 ## Install
 
-Copy this repository's HTTPS clone URL from GitHub's **Code** menu, then
-paste it at the prompt below:
-
 ```bash
-read -r -p "Repository HTTPS clone URL: " VITALS_REPO_URL
-omarchy plugin add "$VITALS_REPO_URL" --enable
+omarchy plugin add https://github.com/tzglobic/omarchy-vitals.git --enable
 ```
 
-Or, using the same URL, clone into place and rescan:
+Or clone into place and rescan:
 
 ```bash
-git clone "$VITALS_REPO_URL" ~/.config/omarchy/plugins/omarchy.vitals
+git clone https://github.com/tzglobic/omarchy-vitals.git \
+  ~/.config/omarchy/plugins/tzglobic.vitals
 omarchy-shell shell rescanPlugins
-omarchy plugin enable omarchy.vitals --section right
+omarchy plugin enable tzglobic.vitals --section right
 ```
-
-### Upgrading from the previous plugin ID
-
-The plugin ID is now `omarchy.vitals`. Before upgrading an existing
-installation, record its settings and remove it using
-`omarchy plugin remove <previous-plugin-id>` (replace the placeholder with
-the ID in the installed copy's `manifest.json`). Then install this version
-and reapply your settings using `omarchy bar set omarchy.vitals ...`.
-Settings stored under the previous ID are not migrated automatically.
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove omarchy.vitals
+omarchy plugin remove tzglobic.vitals
 ```
 
 The plugin keeps no files of its own. Its two remembered choices — the CPU
@@ -109,9 +97,9 @@ own settings API, and go away with that entry.
 Tunable from the shell like any first-party widget:
 
 ```bash
-omarchy bar set omarchy.vitals refreshIntervalSec 5
-omarchy bar set omarchy.vitals temperatureUnit F
-omarchy bar set omarchy.vitals processCount 12
+omarchy bar set tzglobic.vitals refreshIntervalSec 5
+omarchy bar set tzglobic.vitals temperatureUnit F
+omarchy bar set tzglobic.vitals processCount 12
 ```
 
 | Key | Default | Meaning |
@@ -184,7 +172,7 @@ receive the signal. Direct `--signal` calls must include
 
 | Path | Role |
 |------|------|
-| `Panel.qml` | Bar button, panel, sparkline, heat map, tiles, process list |
+| `Panel.qml` | Bar button, panel, sparkline, per-core meters, tiles, process list |
 | `Model.js` | Pure presentation logic — formatting, levels, history geometry |
 | `bin/omarchy-vitals` | The collector: `/proc` and `/sys` to JSON, plus the signal action |
 | `test/model.test.js` | Presentation logic, run with `node` |

@@ -6,14 +6,14 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Live system vitals for the Omarchy bar: CPU with a per-core heat map and a
+// Live system vitals for the Omarchy bar: CPU with per-core meters and a
 // one-minute history, memory, GPU, storage, network and disk I/O, and the
 // processes behind the numbers. One unprivileged collector streams JSON over
 // stdout; the panel talks back over stdin to change cadence, so the rate
 // baselines survive open/close.
 Panel {
   id: root
-  moduleName: "omarchy.vitals"
+  moduleName: "tzglobic.vitals"
   ipcTarget: "vitals"
   // manageIpc: false so this panel can own the single IpcHandler the target
   // permits and expose refresh/state alongside the usual open/close.
@@ -389,7 +389,7 @@ Panel {
             font.pixelSize: Style.font.caption
           }
 
-          // ---------- CPU: header · history · per-core heat map ----------
+          // ---------- CPU: header · history · per-core meters ----------
           Column {
             width: parent.width
             spacing: Style.space(8)
