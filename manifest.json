@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "tzglobic.vitals",
-  "name": "Vitals",
+  "id": "oma-vitals",
+  "name": "Oma Vitals",
   "version": "0.1.0",
   "author": "Vitals contributors",
   "license": "MIT",
@@ -13,7 +13,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Vitals",
+    "displayName": "Oma Vitals",
     "description": "System vitals at a glance: load, memory, thermals, I/O, and top processes, all in the shell's own theme.",
     "category": "System",
     "defaultSection": "right",

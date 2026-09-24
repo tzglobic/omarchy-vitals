@@ -1,4 +1,4 @@
-# Vitals
+# Oma Vitals
 
 Live system vitals for the [Omarchy](https://omarchy.org) shell: a bar icon
 that turns urgent when something is saturated, and a panel with CPU load and
@@ -10,7 +10,7 @@ Omarchy ships a battery panel and a display panel but nothing that answers
 "what is my machine doing right now" without opening a terminal. This does,
 in the shell's own components and theme.
 
-<img src="preview.png" alt="Vitals panel" width="420">
+<img src="preview.png" alt="Oma Vitals panel" width="420">
 
 ## What it does
 
@@ -62,15 +62,15 @@ Or clone into place and rescan:
 
 ```bash
 git clone https://github.com/tzglobic/omarchy-vitals.git \
-  ~/.config/omarchy/plugins/tzglobic.vitals
+  ~/.config/omarchy/plugins/oma-vitals
 omarchy-shell shell rescanPlugins
-omarchy plugin enable tzglobic.vitals --section right
+omarchy plugin enable oma-vitals --section right
 ```
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove tzglobic.vitals
+omarchy plugin remove oma-vitals
 ```
 
 The plugin keeps no files of its own. Its two remembered choices — the CPU
@@ -97,9 +97,9 @@ own settings API, and go away with that entry.
 Tunable from the shell like any first-party widget:
 
 ```bash
-omarchy bar set tzglobic.vitals refreshIntervalSec 5
-omarchy bar set tzglobic.vitals temperatureUnit F
-omarchy bar set tzglobic.vitals processCount 12
+omarchy bar set oma-vitals refreshIntervalSec 5
+omarchy bar set oma-vitals temperatureUnit F
+omarchy bar set oma-vitals processCount 12
 ```
 
 | Key | Default | Meaning |

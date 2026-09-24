@@ -13,7 +13,7 @@ import "Model.js" as Model
 // baselines survive open/close.
 Panel {
   id: root
-  moduleName: "tzglobic.vitals"
+  moduleName: "oma-vitals"
   ipcTarget: "vitals"
   // manageIpc: false so this panel can own the single IpcHandler the target
   // permits and expose refresh/state alongside the usual open/close.
