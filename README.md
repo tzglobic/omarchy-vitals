@@ -41,9 +41,10 @@ in the shell's own components and theme.
 - **Omarchy 4.x.** The widget is a shell plugin (manifest `schemaVersion` 1)
   and builds its UI from the shell's own `qs.Ui` components and `Style`/`Color`
   singletons. Those are internal shell API, so a much older or newer shell may
-  not load it. Developed against Omarchy 4.0.2 with Quickshell 0.3.1.
-- **Python 3.9 or newer**, which Omarchy installs. The collector uses only the standard
-  library.
+  not load it. Developed against Omarchy 4.0.2 and verified on 4.0.4, with
+  Quickshell 0.3.1.
+- **Python 3.9 or newer**, which Omarchy installs. The collector uses only the
+  standard library.
 
 Process actions require Linux PID file descriptor support (kernel 5.3 or
 newer). If unavailable, the collector refuses the action and reports an error.
@@ -84,7 +85,10 @@ Settings stored under the previous ID are not migrated automatically.
 omarchy plugin remove omarchy.vitals
 ```
 
-The plugin keeps no state on disk, so removing it leaves nothing behind.
+The plugin keeps no files of its own. Its two remembered choices — the CPU
+label (right-click) and the expanded per-core meters (`c`) — are stored as
+settings on its entry in `~/.config/omarchy/shell.json`, through the shell's
+own settings API, and go away with that entry.
 
 ## Keyboard
 

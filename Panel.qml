@@ -207,9 +207,12 @@ Panel {
   // works even when compositor screen capture is unavailable, and it frames
   // exactly the card — which is what a marketplace preview wants.
   function snapshot(path) {
+    // IPC callers choose the path, so only accept absolute .png targets.
+    var target = String(path || "")
+    if (!/^\/[^\0]*\.png$/i.test(target) || target.indexOf("/../") >= 0) return false
     if (!root.opened) return false
     var card = keyCatcher.parent && keyCatcher.parent.parent ? keyCatcher.parent.parent : keyCatcher
-    return card.grabToImage(function(result) { result.saveToFile(String(path)) })
+    return card.grabToImage(function(result) { result.saveToFile(target) })
   }
 
   IpcHandler {
